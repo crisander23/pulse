@@ -1,0 +1,1 @@
+DROP INDEX `one_response_per_question`;
