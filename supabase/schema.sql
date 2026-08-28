@@ -11,6 +11,9 @@ create index if not exists presenter_sessions_owner_idx
 
 alter table public.presenter_sessions enable row level security;
 
+grant usage on schema public to anon, authenticated;
+grant select, insert on table public.presenter_sessions to authenticated;
+
 drop policy if exists "Presenters can read their own sessions" on public.presenter_sessions;
 create policy "Presenters can read their own sessions"
   on public.presenter_sessions for select
