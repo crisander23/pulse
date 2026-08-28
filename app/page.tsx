@@ -10,6 +10,15 @@ type PollData = {
   questions: Question[];
   responses: { id: number; questionId: number; answer: string; participantId: string; displayName: string; createdAt: string }[];
 };
+type SessionSummary = {
+  code: string;
+  title: string;
+  prompt: string;
+  activeQuestion: number;
+  ended: number;
+  createdAt: string;
+  responseCount: number;
+};
 const wordPalette = ["#ff7a45", "#b853eb", "#aebcff", "#ddff58", "#99e0d7", "#8bc2ff", "#e7c9c3", "#9bd400", "#ffadb5", "#ef91c5", "#42b8e8", "#ffd11a", "#a8c9a8"];
 const anonymousAdjectives = ["Curious", "Bright", "Kind", "Thoughtful", "Creative", "Calm", "Bold", "Friendly"];
 const anonymousNouns = ["Panda", "Comet", "Otter", "Maple", "Fox", "Sparrow", "River", "Star"];
@@ -57,6 +66,16 @@ function publicOrigin() {
 
 function publicHost() {
   try { return new URL(publicOrigin()).host; } catch { return typeof window !== "undefined" ? window.location.host : "localhost:3000"; }
+}
+
+function formatSessionDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function formatRoomCode(code: string) {
+  return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
 }
 
 function Results({ question, responses, wallTitle, frameless = false, hideWallHeader = false }: { question: Question; responses: PollData["responses"]; wallTitle?: string; frameless?: boolean; hideWallHeader?: boolean }) {
@@ -143,6 +162,49 @@ function SessionReport({ data, compact = false }: { data: PollData; compact?: bo
   </section>;
 }
 
+function SessionManagement({ onCreate, onBack, onOpen }: { onCreate: () => void; onBack: () => void; onOpen: (code: string, view: "present" | "screen") => void }) {
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadSessions = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/polls?list=1", { cache: "no-store" });
+      const result = await response.json().catch(() => ({ error: "The server returned an invalid response." }));
+      if (!response.ok) throw new Error(result.error || "Could not load session history.");
+      setSessions(Array.isArray(result.sessions) ? result.sessions : []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load session history.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  return <main className="session-management">
+    <header className="management-header">
+      <div><Logo /><span className="management-kicker">SESSION HISTORY</span><h1>Your previous sessions</h1><p>Reopen a live room or review a completed response report.</p></div>
+      <div className="management-actions"><button className="management-secondary" onClick={onBack}>Back to Pulse</button><button className="management-primary" onClick={onCreate}>Start new session <span>→</span></button></div>
+    </header>
+    <section className="management-content">
+      <div className="management-toolbar"><div><strong>{sessions.length}</strong> saved {sessions.length === 1 ? "session" : "sessions"}</div><button onClick={loadSessions} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button></div>
+      {loading ? <div className="management-empty"><div className="loader" /><p>Loading your sessions...</p></div>
+        : error ? <div className="management-empty"><strong>Could not load sessions</strong><p>{error}</p><button onClick={loadSessions}>Try again</button></div>
+          : sessions.length ? <div className="session-history-grid">{sessions.map((session) => <article className="session-history-card" key={session.code}>
+            <header><span className={`session-status ${session.ended ? "ended" : "live"}`}>{session.ended ? "ENDED" : "LIVE"}</span><time dateTime={session.createdAt}>{formatSessionDate(session.createdAt)}</time></header>
+            <div className="session-history-code">ROOM {formatRoomCode(session.code)}</div>
+            <h2>{session.title || "Untitled live session"}</h2>
+            <p className={session.prompt ? "session-history-prompt" : "session-history-prompt muted"}>{session.prompt || "Question not added yet"}</p>
+            <footer><span><b>{session.responseCount}</b> responses</span><div><button onClick={() => onOpen(session.code, "present")}>{session.ended ? "Open report" : "Open session"}</button><button className="session-display-button" onClick={() => onOpen(session.code, "screen")}>Display</button></div></footer>
+          </article>)}</div>
+            : <div className="management-empty"><strong>No sessions yet</strong><p>Start your first open-ended session to see it here.</p><button onClick={onCreate}>Start a session</button></div>}
+    </section>
+  </main>;
+}
+
 function PresentationScreen({ code }: { code: string }) {
   const [data, setData] = useState<PollData | null>(null);
   const refresh = useCallback(async () => {
@@ -160,7 +222,7 @@ function PresentationScreen({ code }: { code: string }) {
   </main>;
 }
 
-function Presenter({ code, initial }: { code: string; initial: PollData | null }) {
+function Presenter({ code, initial, onManage }: { code: string; initial: PollData | null; onManage: () => void }) {
   const [data, setData] = useState(initial);
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
@@ -234,7 +296,7 @@ function Presenter({ code, initial }: { code: string; initial: PollData | null }
   }
 
   return <main className="presenter-shell">
-    <aside className="sidebar"><Logo /><div className="deck-title"><span>SESSION TITLE</span><input className="session-title-input" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onBlur={saveTitle} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} placeholder="Name this session" maxLength={80} aria-label="Session title" /></div>
+    <aside className="sidebar"><Logo /><button className="session-nav" onClick={onManage}>← Session history</button><div className="deck-title"><span>SESSION TITLE</span><input className="session-title-input" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onBlur={saveTitle} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} placeholder="Name this session" maxLength={80} aria-label="Session title" /></div>
       <nav className="question-list" aria-label="Question">{data.questions.map((question, index) => <div key={question.id} className="single-question"><span className="slide-number">{index + 1}</span><span className="mini-card"><small>{questionTypeLabel()}</small>{question.prompt}</span></div>)}</nav>
       {!data.questions.length && <button className="add-question" disabled={Boolean(data.room.ended)} onClick={() => setShowComposer(true)}>+ Add your question</button>}
     </aside>
@@ -314,7 +376,7 @@ function Audience({ code }: { code: string }) {
 }
 
 export default function Home() {
-  const [mode, setMode] = useState<"landing" | "present" | "audience" | "screen">("landing");
+  const [mode, setMode] = useState<"landing" | "present" | "audience" | "screen" | "manage">("landing");
   const [code, setCode] = useState("");
   const [data, setData] = useState<PollData | null>(null);
   const [joinCode, setJoinCode] = useState("");
@@ -326,7 +388,9 @@ export default function Home() {
     const present = params.get("present");
     const room = params.get("room");
     const screen = params.get("screen");
-    if (screen) { setCode(screen); setMode("screen"); }
+    const manage = params.get("manage");
+    if (manage) setMode("manage");
+    else if (screen) { setCode(screen); setMode("screen"); }
     else if (present) { setCode(present); setMode("present"); }
     else if (room) { setCode(room); setMode("audience"); }
   }, []);
@@ -355,10 +419,23 @@ export default function Home() {
     if (clean.length === 6) { history.pushState({}, "", "?room=" + clean); setCode(clean); setMode("audience"); }
   }
 
+  function openManagement() {
+    history.pushState({}, "", "?manage=1");
+    setMode("manage");
+  }
+
+  function openSessionFromHistory(sessionCode: string, view: "present" | "screen") {
+    history.pushState({}, "", `/?${view}=${sessionCode}`);
+    setCode(sessionCode);
+    setData(null);
+    setMode(view);
+  }
+
   if (mode === "screen") return <PresentationScreen code={code} />;
-  if (mode === "present") return <Presenter code={code} initial={data} />;
+  if (mode === "present") return <Presenter code={code} initial={data} onManage={openManagement} />;
   if (mode === "audience") return <Audience code={code} />;
-  return <main className="landing"><nav><Logo /><div><a href="#how">How it works</a><a href="#formats">The format</a><button onClick={createRoom}>{creating ? "Creating..." : "Create question"}</button></div></nav>
+  if (mode === "manage") return <SessionManagement onCreate={createRoom} onBack={() => { history.pushState({}, "", "/"); setMode("landing"); }} onOpen={openSessionFromHistory} />;
+  return <main className="landing"><nav><Logo /><div><a href="#how">How it works</a><a href="#formats">The format</a><button className="history-link" onClick={openManagement}>Session history</button><button onClick={createRoom}>{creating ? "Creating..." : "Create question"}</button></div></nav>
     <section className="hero"><div className="hero-copy"><span className="eyebrow">ONE QUESTION. EVERY VOICE.</span><h1>Turn every audience into a <em>conversation.</em></h1><p>Ask one open-ended question. Collect thoughtful answers. Watch the room respond in real time.</p><div className="hero-actions"><button onClick={createRoom} disabled={creating}>{creating ? "Opening your room..." : "Start an open question"}<span>-&gt;</span></button><small>No sign-up needed</small>{createError && <small role="alert">{createError}</small>}</div></div>
       <div className="hero-visual" aria-label="Open question preview"><div className="float-badge badge-one">42 live</div><div className="float-badge badge-two">Anonymous answers</div><div className="preview-card"><div className="preview-top"><span>OPEN QUESTION</span><i>...</i></div><h2>What would make this session better?</h2><div className="preview-cloud"><b>More examples</b><span>Time to discuss</span><strong>Clear goals</strong><i>Small groups</i><em>Real feedback</em><small>More practice</small></div><div className="preview-foot"><span>42 responses</span><span>updating live</span></div></div></div>
     </section>

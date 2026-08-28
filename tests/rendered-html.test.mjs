@@ -48,3 +48,14 @@ test("includes an optional Google Sheets bridge", async () => {
   assert.match(script, /function doPost/);
   assert.match(script, /Responses/);
 });
+
+test("supports session history", async () => {
+  const page = await read("app/page.tsx");
+  const route = await read("app/api/polls/route.ts");
+  const script = await read("google-apps-script/Code.gs");
+
+  assert.match(page, /Your previous sessions/);
+  assert.match(page, /Session history/);
+  assert.match(route, /list=1/);
+  assert.match(script, /function listRooms/);
+});

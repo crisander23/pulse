@@ -25,12 +25,41 @@ function setup() {
 function doGet(event) {
   try {
     authorize(event.parameter.secret);
+    if (String(event.parameter.action || "") === "list") return json(listRooms());
     const code = normalizeCode(event.parameter.code);
     if (code.length !== 6) throw new Error("A valid room code is required.");
     return json(readRoom(code));
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+function listRooms() {
+  const roomsSheet = getSheet(CONFIG.roomsSheet);
+  const roomValues = roomsSheet.getDataRange().getValues();
+  const responseCounts = {};
+  const responsesSheet = getSheet(CONFIG.responsesSheet);
+  responsesSheet.getDataRange().getValues().slice(1).forEach((row) => {
+    const code = String(row[1] || "");
+    if (code) responseCounts[code] = (responseCounts[code] || 0) + 1;
+  });
+
+  const sessions = roomValues.slice(1)
+    .filter((row) => String(row[0] || "").trim())
+    .map((row) => {
+      const code = String(row[0]);
+      return {
+        code: code,
+        title: String(row[1] || "Untitled live session"),
+        prompt: String(row[2] || ""),
+        activeQuestion: Number(row[4] || 0),
+        ended: Number(row[5] || 0),
+        createdAt: String(row[6] || ""),
+        responseCount: responseCounts[code] || 0,
+      };
+    })
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+  return { sessions: sessions };
 }
 
 function doPost(event) {

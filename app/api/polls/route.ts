@@ -8,6 +8,11 @@ type RoomRow = {
   createdAt: string;
 };
 
+type SessionSummary = RoomRow & {
+  prompt: string;
+  responseCount: number;
+};
+
 type QuestionRow = {
   id: number;
   type: string;
@@ -61,7 +66,8 @@ async function proxySheetsGet(code: string) {
   if (!googleSheetsUrl || !googleSheetsSecret) return sheetsConfigError();
   try {
     const url = new URL(googleSheetsUrl);
-    url.searchParams.set("code", code);
+    if (code) url.searchParams.set("code", code);
+    else url.searchParams.set("action", "list");
     url.searchParams.set("secret", googleSheetsSecret);
     const response = await fetch(url, { cache: "no-store" });
     const result = await response.json().catch(() => ({ error: "The Google Sheets backend returned an invalid response." }));
@@ -70,6 +76,20 @@ async function proxySheetsGet(code: string) {
   } catch (error) {
     return databaseError(error);
   }
+}
+
+async function listRooms() {
+  const sql = getDb();
+  return (await sql`
+    SELECT r.code, r.title, r.active_question AS "activeQuestion", r.ended,
+      r.created_at AS "createdAt", COALESCE(q.prompt, '') AS prompt,
+      COUNT(response.id)::int AS "responseCount"
+    FROM rooms r
+    LEFT JOIN questions q ON q.room_code = r.code
+    LEFT JOIN responses response ON response.room_code = r.code
+    GROUP BY r.code, r.title, r.active_question, r.ended, r.created_at, q.prompt
+    ORDER BY r.created_at DESC
+  `) as SessionSummary[];
 }
 
 async function readRoom(code: string) {
@@ -101,7 +121,17 @@ async function readRoom(code: string) {
 }
 
 export async function GET(request: Request) {
-  const code = new URL(request.url).searchParams.get("code")?.replace(/\D/g, "").slice(0, 6) || "";
+  const params = new URL(request.url).searchParams;
+  const code = params.get("code")?.replace(/\D/g, "").slice(0, 6) || "";
+  if (params.get("list") === "1") {
+    if (googleSheetsUrl) return proxySheetsGet("");
+    try {
+      await ensureSchema();
+      return Response.json({ sessions: await listRooms() });
+    } catch (error) {
+      return databaseError(error);
+    }
+  }
   if (code.length !== 6) return Response.json({ error: "A valid room code is required." }, { status: 400 });
   if (googleSheetsUrl) return proxySheetsGet(code);
   try {
