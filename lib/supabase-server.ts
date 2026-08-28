@@ -6,6 +6,18 @@ export type PresenterAuthResult =
   | { auth: AuthenticatedSupabase; error: null }
   | { auth: null; error: string };
 
+let publicClient: SupabaseClient | null = null;
+
+export function getPublicSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !key) throw new Error("Supabase is not configured.");
+  publicClient ??= createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+  return publicClient;
+}
+
 export async function getAuthenticatedSupabase(request: Request): Promise<AuthenticatedSupabase | null> {
   const authorization = request.headers.get("authorization");
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -27,7 +39,7 @@ export async function requireOwnedSession(request: Request, code: string): Promi
   if (!auth) return { auth: null, error: "Presenter sign-in is required for this action." };
 
   const { data, error } = await auth.client
-    .from("presenter_sessions")
+    .from("rooms")
     .select("code")
     .eq("code", code)
     .eq("owner_id", auth.user.id)

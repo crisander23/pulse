@@ -79,6 +79,25 @@ function formatRoomCode(code: string) {
   return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
 }
 
+function csvCell(value: string | number) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function downloadResultsCsv(data: PollData) {
+  const rows: (string | number)[][] = [["Room code", "Session title", "Question", "Participant ID", "Participant name", "Answer", "Submitted at"]];
+  data.responses.forEach((response) => {
+    const question = data.questions.find((item) => item.id === response.questionId);
+    rows.push([data.room.code, data.room.title, question?.prompt || "", response.participantId, response.displayName || "Anonymous participant", response.answer, response.createdAt]);
+  });
+  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `pulse-${data.room.code}-results.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 async function presenterFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) throw new Error("Supabase authentication is not configured yet.");
@@ -190,7 +209,7 @@ function DisplayResponseBoard({ question, responses }: { question: Question; res
 function SessionReport({ data, compact = false }: { data: PollData; compact?: boolean }) {
   const participants = new Set(data.responses.map((response) => response.participantId)).size;
   return <section className={"session-report" + (compact ? " compact-report" : "")}>
-    <div className="report-heading"><div><span className="question-type">SESSION COMPLETE</span><h1>{data.room.title}</h1><h2 className="report-subtitle">Consolidated report</h2><p>Every submitted response is included in this summary.</p></div>
+    <div className="report-heading"><div><span className="question-type">SESSION COMPLETE</span><h1>{data.room.title}</h1><h2 className="report-subtitle">Consolidated report</h2><p>Every submitted response is included in this summary.</p></div><button className="report-export-button" onClick={() => downloadResultsCsv(data)}>Export results</button>
       <div className="report-metrics"><div><strong>{data.responses.length}</strong><span>Total responses</span></div><div><strong>{participants}</strong><span>Participants</span></div><div><strong>{data.questions.length}</strong><span>Questions</span></div></div>
     </div>
     <div className="report-questions">{data.questions.map((question, index) => {
@@ -339,7 +358,7 @@ function Presenter({ code, initial, onManage }: { code: string; initial: PollDat
       {!data.questions.length && <button className="add-question" disabled={Boolean(data.room.ended)} onClick={() => setShowComposer(true)}>+ Add your question</button>}
     </aside>
     <section className="stage-wrap">
-      <header className="topbar"><div className="live-pill"><span /> {data.room.ended ? "ENDED" : "LIVE"}</div><div className="room-share"><span>Join at <b>{publicHost()}</b></span><strong>{code.slice(0, 3)} {code.slice(3)}</strong><button onClick={() => setShowQr(true)}>Show QR</button><button onClick={copyLink}>{copied ? "Copied!" : "Copy link"}</button><button className="present-button" onClick={openPresentation}>Open display</button>{!data.room.ended && <button className="end-button" onClick={endSession}>End session</button>}</div></header>
+      <header className="topbar"><div className="live-pill"><span /> {data.room.ended ? "ENDED" : "LIVE"}</div><div className="room-share"><span>Join at <b>{publicHost()}</b></span><strong>{code.slice(0, 3)} {code.slice(3)}</strong><button onClick={() => setShowQr(true)}>Show QR</button><button onClick={copyLink}>{copied ? "Copied!" : "Copy link"}</button><button onClick={() => downloadResultsCsv(data)}>Export results</button><button className="present-button" onClick={openPresentation}>Open display</button>{!data.room.ended && <button className="end-button" onClick={endSession}>End session</button>}</div></header>
       {data.room.ended ? <SessionReport data={data} /> : data.questions.length ? <section className="stage admin-live-stage">
         <header className="admin-report-heading"><span>LIVE SESSION REPORT</span><h1>{data.room.title}</h1><p>Every question and response updates here as your audience submits.</p></header>
         <div className="admin-question-stack">{data.questions.map((question, index) => {

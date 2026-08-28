@@ -15,14 +15,14 @@ test("uses the standard Next.js/Vercel runtime scripts", async () => {
   assert.equal(packageJson.scripts.start, "next start");
 });
 
-test("poll API uses the Vercel-compatible Postgres connection", async () => {
+test("poll API uses Supabase storage", async () => {
   const route = await read("app/api/polls/route.ts");
-  const database = await read("db/index.ts");
+  const server = await read("lib/supabase-server.ts");
 
-  assert.match(route, /@\/db/);
+  assert.match(route, /getPublicSupabase/);
   assert.doesNotMatch(route, /cloudflare:workers|D1Database/);
-  assert.match(database, /DATABASE_URL/);
-  assert.match(database, /@neondatabase\/serverless/);
+  assert.match(server, /@supabase\/supabase-js/);
+  assert.match(route, /from\("rooms"\)/);
 });
 
 test("supports anonymous open-ended responses", async () => {
@@ -33,31 +33,22 @@ test("supports anonymous open-ended responses", async () => {
   assert.match(page, /type: "open"/);
   assert.match(page, /Share your thoughts/);
   assert.match(page, /maxLength=\{500\}/);
-  assert.match(route, /type !== "open"/);
+  assert.match(route, /type: "open"/);
   assert.match(route, /already has its one open question/);
-  assert.match(route, /type === "open" \? 500 : 48/);
-});
-
-test("includes an optional Google Sheets bridge", async () => {
-  const route = await read("app/api/polls/route.ts");
-  const script = await read("google-apps-script/Code.gs");
-
-  assert.match(route, /GOOGLE_APPS_SCRIPT_URL/);
-  assert.match(route, /GOOGLE_APPS_SCRIPT_SECRET/);
-  assert.match(script, /function doGet/);
-  assert.match(script, /function doPost/);
-  assert.match(script, /Responses/);
+  assert.match(route, /from\("responses"\)/);
+  assert.match(route, /participant_id/);
+  assert.match(route, /answer/);
 });
 
 test("supports session history", async () => {
   const page = await read("app/page.tsx");
   const route = await read("app/api/polls/route.ts");
-  const script = await read("google-apps-script/Code.gs");
 
   assert.match(page, /Your previous sessions/);
   assert.match(page, /Session history/);
   assert.match(route, /params\.get\("list"\) === "1"/);
-  assert.match(route, /presenter_sessions/);
-  assert.match(route, /another presenter account/);
-  assert.match(script, /function listRooms/);
+  assert.match(route, /from\("rooms"\)/);
+  assert.match(route, /owner_id/);
+  assert.match(page, /Export results/);
+  assert.match(page, /text\/csv/);
 });

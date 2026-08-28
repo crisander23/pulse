@@ -6,13 +6,13 @@ Pulse is a focused live open-question app: a presenter creates one room and one 
 
 - Next.js App Router
 - React
-- Vercel-compatible Node.js route handler
-- Postgres through Neon’s serverless driver
+- Supabase Auth and Supabase Postgres
+- Vercel
 - Tailwind CSS
 
 ## Local setup
 
-Prerequisites: Node.js `>=22.13.0` and a Postgres database.
+Prerequisites: Node.js `>=22.13.0`.
 
 ```bash
 npm install
@@ -20,44 +20,21 @@ copy .env.example .env.local
 npm run dev
 ```
 
-Set `DATABASE_URL` in `.env.local` to a Neon, Vercel Postgres/Neon, Supabase, or other Postgres connection string. Set `NEXT_PUBLIC_SITE_URL` to the public site URL in production. The poll tables are created automatically on the first API request. Each room accepts one open-ended question with responses up to 500 characters.
+Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `NEXT_PUBLIC_SITE_URL` in `.env.local`. Run [`supabase/schema.sql`](supabase/schema.sql) once in the Supabase SQL Editor. The local server is available at `http://localhost:3000`; the dev script also binds to the host machine’s network interfaces.
 
-The local server is available at `http://localhost:3000`. The dev script binds to all interfaces, so another device on the same network can use the host machine’s IP address.
+Presenter accounts are managed by Supabase Auth. Audience members remain anonymous. Rooms, questions, responses, and presenter ownership are stored in Supabase Postgres.
 
-## Optional Google Sheets backend
+## Exporting results
 
-For a small local session, the one-question backend can use Google Sheets instead of Postgres:
-
-1. Create a Google Sheet and copy its ID from the URL.
-2. Open **Extensions → Apps Script**, create a script, and paste `google-apps-script/Code.gs` into it.
-3. Replace `spreadsheetId` and `sharedSecret` at the top of `Code.gs`.
-4. Run `setup()` once and approve the Google Sheets permissions.
-5. Deploy it from **Deploy → New deployment → Web app**, executing as you and allowing access to anyone with the link.
-6. Add the deployment URL and the same secret to `.env.local`:
-
-```env
-GOOGLE_APPS_SCRIPT_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
-GOOGLE_APPS_SCRIPT_SECRET=the-same-secret-used-in-Code.gs
-```
-
-Restart `npm run dev`. When `GOOGLE_APPS_SCRIPT_URL` is present, the Next.js API proxies room and response requests to the Apps Script backend. The sheet will contain `Rooms` and `Responses` tabs. Keep the shared secret private; anyone with the deployment URL and secret can write responses.
+Use **Export results** in the presenter view or completed session report to download a CSV containing the room, question, participant name, answer, and submission time. No Google Sheet connection is required.
 
 ## Vercel deployment
 
-1. Push this repository to GitHub.
-2. Import the repository into Vercel.
-3. Keep the detected Next.js framework and default build settings.
-4. Add `DATABASE_URL` as a Production, Preview, and Development environment variable.
-5. Add `NEXT_PUBLIC_SITE_URL` with the deployment URL or your custom domain.
-6. Deploy.
+1. Push this repository to GitHub and import it into Vercel.
+2. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `NEXT_PUBLIC_SITE_URL` as Production, Preview, and Development variables.
+3. Keep the default Next.js build settings and deploy.
 
-Vercel should use:
-
-- Install command: `npm install`
-- Build command: `next build` (or `npm run build`)
-- Output directory: `.next`
-
-Do not use the old Cloudflare D1 binding. The API now reads `DATABASE_URL` and uses standard Postgres SQL through `@neondatabase/serverless`.
+Vercel uses `npm install` and `next build`. Supabase Auth’s Site URL and redirect URLs must include the deployed Vercel URL.
 
 ## Useful commands
 
@@ -66,15 +43,3 @@ Do not use the old Cloudflare D1 binding. The API now reads `DATABASE_URL` and u
 - `npm start`: serve the production build locally
 - `npm test`: run the build and deployment-safety checks
 - `npm run lint`: run ESLint
-# Presenter authentication
-
-Pulse uses Supabase Auth for presenter accounts. Audience members remain anonymous and do not need to sign up. Add these environment variables locally and in Vercel:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
-```
-
-The existing Google Apps Script variables continue to store poll sessions and responses. Presenter-only actions such as creating, editing, and ending sessions require a valid Supabase session.
-
-Run [`supabase/schema.sql`](supabase/schema.sql) once in the Supabase SQL Editor. It stores the presenter-to-session ownership mapping while Google Sheets continues to store poll content and responses.
