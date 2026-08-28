@@ -405,6 +405,8 @@ function Audience({ code }: { code: string }) {
   const [name, setName] = useState("");
   const [sentFor, setSentFor] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const refresh = useCallback(async () => {
     const response = await fetch("/api/polls?code=" + code, { cache: "no-store" });
     if (response.ok) setData(await response.json()); else setError("That room is not live yet.");
@@ -414,9 +416,21 @@ function Audience({ code }: { code: string }) {
   useEffect(() => { setAnswer(""); }, [active?.id]);
 
   async function submit(value: string) {
-    if (!active || !value.trim()) return;
-    const response = await fetch("/api/polls", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "vote", code, questionId: active.id, participantId: participantId(), displayName: name.trim().slice(0, 60) || anonymousDisplayName(), answer: value.trim().slice(0, 500) }) });
-    if (response.ok) { setSentFor(active.id); setAnswer(""); refresh(); }
+    if (!active || !value.trim() || submitting) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const response = await fetch("/api/polls", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "vote", code, questionId: active.id, participantId: participantId(), displayName: name.trim().slice(0, 60) || anonymousDisplayName(), answer: value.trim().slice(0, 500) }) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Could not send your response. Please try again.");
+      setSentFor(active.id);
+      setAnswer("");
+      refresh();
+    } catch (submitFailure) {
+      setSubmitError(submitFailure instanceof Error ? submitFailure.message : "Could not send your response. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (error) return <main className="audience-bg"><div className="phone-card error-card"><Logo /><h1>Room not found</h1><p>{error}</p><Link href="/">Try another code</Link></div></main>;
@@ -428,7 +442,7 @@ function Audience({ code }: { code: string }) {
   return <main className="audience-bg"><header className="audience-header"><Logo /><span>Room <b>{code}</b></span></header><section className="phone-card">
     <span className="question-kicker">Question {active.position + 1} of {data.questions.length}</span><h1>{active.prompt}</h1>
     {alreadySent ? <div className="thanks"><div>OK</div><h2>Your response is in!</h2><p>Watch the shared screen for live results.</p><button onClick={() => setSentFor(null)}>Submit another response</button></div>
-      : <form className="open-form" onSubmit={(event: FormEvent) => { event.preventDefault(); submit(answer); }}><label className="audience-name-field"><span>Name <small>optional</small></span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} aria-label="Your name (optional)" /></label><textarea autoFocus value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Share your thoughts..." maxLength={500} rows={6} /><div className="open-form-footer"><small>{answer.length}/500 characters</small><button disabled={!answer.trim()}>Send response</button></div></form>}
+      : <form className="open-form" onSubmit={(event: FormEvent) => { event.preventDefault(); submit(answer); }}><label className="audience-name-field"><span>Name <small>optional</small></span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} aria-label="Your name (optional)" /></label><textarea autoFocus value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Share your thoughts..." maxLength={500} rows={6} /><div className="open-form-footer"><small>{answer.length}/500 characters</small><button type="submit" disabled={!answer.trim() || submitting} aria-busy={submitting}>{submitting && <span className="button-loader" aria-hidden="true" />}{submitting ? "Sending..." : "Send response"}</button></div>{submitError && <p className="audience-submit-error" role="alert">{submitError}</p>}</form>}
   </section><p className="audience-note">Responses are anonymous</p></main>;
 }
 
@@ -441,6 +455,7 @@ export default function Home() {
   const [createError, setCreateError] = useState("");
   const [authReady, setAuthReady] = useState(false);
   const [authUser, setAuthUser] = useState<{ email?: string } | null>(null);
+  const [routeReady, setRouteReady] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -460,6 +475,7 @@ export default function Home() {
     else if (screen) { setCode(screen); setMode("screen"); }
     else if (present) { setCode(present); setMode("present"); }
     else if (room) { setCode(room); setMode("audience"); }
+    setRouteReady(true);
   }, []);
 
   async function createRoom() {
@@ -500,6 +516,7 @@ export default function Home() {
     setMode(view);
   }
 
+  if (!routeReady) return <main className="center"><div className="loader" /><p>Opening Pulse...</p></main>;
   if (mode === "screen") return <PresentationScreen code={code} />;
   if (mode === "auth") return <AuthPanel onBack={() => { history.pushState({}, "", "/"); setMode("landing"); }} onSuccess={() => { history.pushState({}, "", "/"); setMode("landing"); }} />;
   if (mode === "present") return <Presenter code={code} initial={data} onManage={openManagement} />;
