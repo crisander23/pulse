@@ -89,7 +89,7 @@ async function presenterFetch(input: RequestInfo | URL, init: RequestInit = {}) 
   return fetch(input, { ...init, headers });
 }
 
-function AuthPanel({ onBack }: { onBack: () => void }) {
+function AuthPanel({ onBack, onSuccess }: { onBack: () => void; onSuccess: () => void }) {
   const supabase = getSupabaseBrowserClient();
   const [signUp, setSignUp] = useState(false);
   const [email, setEmail] = useState("");
@@ -109,7 +109,7 @@ function AuthPanel({ onBack }: { onBack: () => void }) {
       : await supabase.auth.signInWithPassword({ email: email.trim(), password });
     if (result.error) setError(result.error.message);
     else if (signUp && !result.data.session) setMessage("Check your email to confirm your account, then sign in.");
-    else setMessage(signUp ? "Account created." : "Signed in.");
+    else { setMessage(signUp ? "Account created." : "Signed in."); onSuccess(); }
     setBusy(false);
   }
 
@@ -482,7 +482,7 @@ export default function Home() {
   }
 
   if (mode === "screen") return <PresentationScreen code={code} />;
-  if (mode === "auth") return <AuthPanel onBack={() => { history.pushState({}, "", "/"); setMode("landing"); }} />;
+  if (mode === "auth") return <AuthPanel onBack={() => { history.pushState({}, "", "/"); setMode("landing"); }} onSuccess={() => { history.pushState({}, "", "/"); setMode("landing"); }} />;
   if (mode === "present") return <Presenter code={code} initial={data} onManage={openManagement} />;
   if (mode === "audience") return <Audience code={code} />;
   if (mode === "manage") return <SessionManagement onCreate={createRoom} onBack={() => { history.pushState({}, "", "/"); setMode("landing"); }} onOpen={openSessionFromHistory} />;
