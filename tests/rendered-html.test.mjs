@@ -57,5 +57,7 @@ test("supports session history", async () => {
   assert.match(page, /Your previous sessions/);
   assert.match(page, /Session history/);
   assert.match(route, /params\.get\("list"\) === "1"/);
+  assert.match(route, /presenter_sessions/);
+  assert.match(route, /another presenter account/);
   assert.match(script, /function listRooms/);
 });

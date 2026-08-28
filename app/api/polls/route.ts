@@ -1,5 +1,5 @@
 import { ensureSchema, getDb } from "@/db";
-import { getAuthenticatedSupabase } from "@/lib/supabase-server";
+import { getAuthenticatedSupabase, requireOwnedSession } from "@/lib/supabase-server";
 
 type RoomRow = {
   code: string;
@@ -46,8 +46,29 @@ function sheetsConfigError() {
   return Response.json({ error: "Google Sheets is selected, but GOOGLE_APPS_SCRIPT_SECRET is not configured." }, { status: 500 });
 }
 
-function presenterAuthError() {
-  return Response.json({ error: "Presenter sign-in is required for this action." }, { status: 401 });
+function presenterError(message: string, status = 401) {
+  return Response.json({ error: message }, { status });
+}
+
+async function ownedSessionCodes(request: Request) {
+  const auth = await getAuthenticatedSupabase(request);
+  if (!auth) return { response: presenterError("Presenter sign-in is required for this action.") };
+  const { data, error } = await auth.client.from("presenter_sessions").select("code");
+  if (error) {
+    console.error("[polls] presenter session list failed", error);
+    return { response: presenterError("Presenter session ownership is not configured yet.", 500) };
+  }
+  return { auth, codes: new Set((data || []).map((row) => row.code)) };
+}
+
+async function rememberSession(auth: Awaited<ReturnType<typeof getAuthenticatedSupabase>>, code: string) {
+  if (!auth) return false;
+  const { error } = await auth.client.from("presenter_sessions").insert({ code, owner_id: auth.user.id });
+  if (error) {
+    console.error("[polls] presenter session ownership insert failed", error);
+    return false;
+  }
+  return true;
 }
 
 async function proxySheetsPost(body: Record<string, unknown>) {
@@ -129,11 +150,17 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const code = params.get("code")?.replace(/\D/g, "").slice(0, 6) || "";
   if (params.get("list") === "1") {
-    if (!await getAuthenticatedSupabase(request)) return presenterAuthError();
-    if (googleSheetsUrl) return proxySheetsGet("");
+    const ownership = await ownedSessionCodes(request);
+    if ("response" in ownership) return ownership.response;
+    if (googleSheetsUrl) {
+      const response = await proxySheetsGet("");
+      const result = await response.json().catch(() => ({ error: "The Google Sheets backend returned an invalid response." })) as { sessions?: SessionSummary[]; error?: string };
+      if (!response.ok) return Response.json(result, { status: response.status });
+      return Response.json({ ...result, sessions: Array.isArray(result.sessions) ? result.sessions.filter((session: SessionSummary) => ownership.codes.has(session.code)) : [] });
+    }
     try {
       await ensureSchema();
-      return Response.json({ sessions: await listRooms() });
+      return Response.json({ sessions: (await listRooms()).filter((session) => ownership.codes.has(session.code)) });
     } catch (error) {
       return databaseError(error);
     }
@@ -158,8 +185,24 @@ export async function POST(request: Request) {
   }
   const action = String(body.action || "");
   const presenterActions = new Set(["create", "updateTitle", "addQuestion", "activate", "end"]);
-  if (presenterActions.has(action) && !await getAuthenticatedSupabase(request)) return presenterAuthError();
-  if (googleSheetsUrl) return proxySheetsPost(body);
+  const presenterAuth = presenterActions.has(action) ? await getAuthenticatedSupabase(request) : null;
+  if (presenterActions.has(action) && !presenterAuth) return presenterError("Presenter sign-in is required for this action.");
+  if (action !== "create" && presenterActions.has(action)) {
+    const owned = await requireOwnedSession(request, String(body.code || "").replace(/\D/g, "").slice(0, 6));
+    if (!owned.auth) return presenterError(owned.error, owned.error.includes("another presenter") ? 403 : 500);
+  }
+  if (googleSheetsUrl) {
+    const response = await proxySheetsPost(body);
+    if (action === "create" && response.ok && presenterAuth) {
+      const result = await response.json().catch(() => null) as { room?: { code?: string } } | null;
+      const createdCode = result?.room?.code;
+      if (!createdCode || !await rememberSession(presenterAuth, createdCode)) {
+        return presenterError("The session was created, but ownership could not be saved. Please contact the administrator.", 500);
+      }
+      return Response.json(result, { status: response.status });
+    }
+    return response;
+  }
   try {
     await ensureSchema();
   } catch (error) {
@@ -182,6 +225,9 @@ export async function POST(request: Request) {
       INSERT INTO rooms (code, title, active_question, ended, created_at)
       VALUES (${code}, ${"Untitled live session"}, 0, 0, ${new Date().toISOString()})
     `;
+    if (!presenterAuth || !await rememberSession(presenterAuth, code)) {
+      return presenterError("The session was created, but ownership could not be saved. Please contact the administrator.", 500);
+    }
     return Response.json(await readRoom(code), { status: 201 });
   }
 

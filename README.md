@@ -76,3 +76,5 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
 ```
 
 The existing Google Apps Script variables continue to store poll sessions and responses. Presenter-only actions such as creating, editing, and ending sessions require a valid Supabase session.
+
+Run [`supabase/schema.sql`](supabase/schema.sql) once in the Supabase SQL Editor. It stores the presenter-to-session ownership mapping while Google Sheets continues to store poll content and responses.
