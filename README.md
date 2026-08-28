@@ -1,98 +1,68 @@
-# vinext-starter
+# Pulse Live Polls
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Pulse is a focused live open-question app: a presenter creates one room and one prompt, shares the room code or link, and participants submit anonymous text answers while the presenter watches the response wall update in real time.
 
-## Prerequisites
+## Stack
 
-- Node.js `>=22.13.0`
+- Next.js App Router
+- React
+- Vercel-compatible Node.js route handler
+- Postgres through Neon’s serverless driver
+- Tailwind CSS
 
-## Quick Start
+## Local setup
+
+Prerequisites: Node.js `>=22.13.0` and a Postgres database.
 
 ```bash
 npm install
+copy .env.example .env.local
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+Set `DATABASE_URL` in `.env.local` to a Neon, Vercel Postgres/Neon, Supabase, or other Postgres connection string. Set `NEXT_PUBLIC_SITE_URL` to the public site URL in production. The poll tables are created automatically on the first API request. Each room accepts one open-ended question with responses up to 500 characters.
 
-## Included Shape
+The local server is available at `http://localhost:3000`. The dev script binds to all interfaces, so another device on the same network can use the host machine’s IP address.
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## Optional Google Sheets backend
 
-## Workspace Auth Headers
+For a small local session, the one-question backend can use Google Sheets instead of Postgres:
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
+1. Create a Google Sheet and copy its ID from the URL.
+2. Open **Extensions → Apps Script**, create a script, and paste `google-apps-script/Code.gs` into it.
+3. Replace `spreadsheetId` and `sharedSecret` at the top of `Code.gs`.
+4. Run `setup()` once and approve the Google Sheets permissions.
+5. Deploy it from **Deploy → New deployment → Web app**, executing as you and allowing access to anyone with the link.
+6. Add the deployment URL and the same secret to `.env.local`:
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```env
+GOOGLE_APPS_SCRIPT_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
+GOOGLE_APPS_SCRIPT_SECRET=the-same-secret-used-in-Code.gs
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+Restart `npm run dev`. When `GOOGLE_APPS_SCRIPT_URL` is present, the Next.js API proxies room and response requests to the Apps Script backend. The sheet will contain `Rooms` and `Responses` tabs. Keep the shared secret private; anyone with the deployment URL and secret can write responses.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+## Vercel deployment
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+1. Push this repository to GitHub.
+2. Import the repository into Vercel.
+3. Keep the detected Next.js framework and default build settings.
+4. Add `DATABASE_URL` as a Production, Preview, and Development environment variable.
+5. Add `NEXT_PUBLIC_SITE_URL` with the deployment URL or your custom domain.
+6. Deploy.
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+Vercel should use:
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+- Install command: `npm install`
+- Build command: `next build` (or `npm run build`)
+- Output directory: `.next`
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+Do not use the old Cloudflare D1 binding. The API now reads `DATABASE_URL` and uses standard Postgres SQL through `@neondatabase/serverless`.
 
-## Useful Commands
+## Useful commands
 
 - `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- `npm run build`: create a production build
+- `npm start`: serve the production build locally
+- `npm test`: run the build and deployment-safety checks
+- `npm run lint`: run ESLint

@@ -1,1 +1,0 @@
-ALTER TABLE `rooms` ADD `ended` integer DEFAULT 0 NOT NULL;

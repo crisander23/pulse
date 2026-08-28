@@ -1,53 +1,151 @@
-import { env } from "cloudflare:workers";
+import { ensureSchema, getDb } from "@/db";
 
-async function ensureSchema(db: D1Database) {
-  await db.batch([
-    db.prepare("CREATE TABLE IF NOT EXISTS rooms (code TEXT PRIMARY KEY, title TEXT NOT NULL, active_question INTEGER NOT NULL DEFAULT 0, ended INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS questions (id INTEGER PRIMARY KEY AUTOINCREMENT, room_code TEXT NOT NULL, type TEXT NOT NULL, prompt TEXT NOT NULL, options TEXT NOT NULL DEFAULT '[]', position INTEGER NOT NULL)"),
-    db.prepare("CREATE TABLE IF NOT EXISTS responses (id INTEGER PRIMARY KEY AUTOINCREMENT, room_code TEXT NOT NULL, question_id INTEGER NOT NULL, participant_id TEXT NOT NULL, answer TEXT NOT NULL, created_at TEXT NOT NULL)"),
-    db.prepare("DROP INDEX IF EXISTS one_response_per_question"),
-    db.prepare("CREATE INDEX IF NOT EXISTS questions_room_idx ON questions(room_code, position)"),
-    db.prepare("CREATE INDEX IF NOT EXISTS responses_room_idx ON responses(room_code, question_id)"),
-  ]);
-  const columns = await db.prepare("PRAGMA table_info(rooms)").all<{ name: string }>();
-  if (!columns.results.some((column) => column.name === "ended")) {
-    await db.prepare("ALTER TABLE rooms ADD COLUMN ended INTEGER NOT NULL DEFAULT 0").run();
+type RoomRow = {
+  code: string;
+  title: string;
+  activeQuestion: number;
+  ended: number;
+  createdAt: string;
+};
+
+type QuestionRow = {
+  id: number;
+  type: string;
+  prompt: string;
+  options: string;
+  position: number;
+};
+
+type ResponseRow = {
+  id: number;
+  questionId: number;
+  participantId: string;
+  displayName: string;
+  answer: string;
+  createdAt: string;
+};
+
+function databaseError(error: unknown) {
+  console.error("[polls] database request failed", error);
+  const message = process.env.NODE_ENV === "development" && error instanceof Error
+    ? error.message
+    : "The poll database is unavailable. Check DATABASE_URL and try again.";
+  return Response.json({ error: message }, { status: 500 });
+}
+
+const googleSheetsUrl = process.env.GOOGLE_APPS_SCRIPT_URL?.trim();
+const googleSheetsSecret = process.env.GOOGLE_APPS_SCRIPT_SECRET?.trim();
+
+function sheetsConfigError() {
+  return Response.json({ error: "Google Sheets is selected, but GOOGLE_APPS_SCRIPT_SECRET is not configured." }, { status: 500 });
+}
+
+async function proxySheetsPost(body: Record<string, unknown>) {
+  if (!googleSheetsUrl || !googleSheetsSecret) return sheetsConfigError();
+  try {
+    const response = await fetch(googleSheetsUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, secret: googleSheetsSecret }),
+      cache: "no-store",
+    });
+    const result = await response.json().catch(() => ({ error: "The Google Sheets backend returned an invalid response." }));
+    const status = typeof result.status === "number" ? result.status : response.ok ? 200 : response.status;
+    return Response.json(result, { status });
+  } catch (error) {
+    return databaseError(error);
   }
 }
 
-async function readRoom(db: D1Database, code: string) {
-  const room = await db.prepare("SELECT code, title, active_question AS activeQuestion, ended FROM rooms WHERE code = ?").bind(code).first();
+async function proxySheetsGet(code: string) {
+  if (!googleSheetsUrl || !googleSheetsSecret) return sheetsConfigError();
+  try {
+    const url = new URL(googleSheetsUrl);
+    url.searchParams.set("code", code);
+    url.searchParams.set("secret", googleSheetsSecret);
+    const response = await fetch(url, { cache: "no-store" });
+    const result = await response.json().catch(() => ({ error: "The Google Sheets backend returned an invalid response." }));
+    const status = typeof result.status === "number" ? result.status : response.ok ? 200 : response.status;
+    return Response.json(result, { status });
+  } catch (error) {
+    return databaseError(error);
+  }
+}
+
+async function readRoom(code: string) {
+  const sql = getDb();
+  const roomRows = (await sql`
+    SELECT code, title, active_question AS "activeQuestion", ended, created_at AS "createdAt"
+    FROM rooms WHERE code = ${code}
+  `) as RoomRow[];
+  const room = roomRows[0];
   if (!room) return null;
-  const questions = await db.prepare("SELECT id, type, prompt, options, position FROM questions WHERE room_code = ? ORDER BY position").bind(code).all();
-  const responses = await db.prepare("SELECT id, question_id AS questionId, participant_id AS participantId, answer, created_at AS createdAt FROM responses WHERE room_code = ? ORDER BY id").bind(code).all();
+
+  const questions = (await sql`
+    SELECT id, type, prompt, options, position
+    FROM questions WHERE room_code = ${code} ORDER BY position
+  `) as QuestionRow[];
+  const responses = (await sql`
+    SELECT id, question_id AS "questionId", participant_id AS "participantId", display_name AS "displayName", answer, created_at AS "createdAt"
+    FROM responses WHERE room_code = ${code} ORDER BY id
+  `) as ResponseRow[];
+
   return {
     room,
-    questions: questions.results.map((question) => ({ ...question, options: JSON.parse(String(question.options || "[]")) })),
-    responses: responses.results,
+    questions: questions.map((question) => ({
+      ...question,
+      options: JSON.parse(question.options || "[]") as string[],
+    })),
+    responses,
   };
 }
 
 export async function GET(request: Request) {
   const code = new URL(request.url).searchParams.get("code")?.replace(/\D/g, "").slice(0, 6) || "";
   if (code.length !== 6) return Response.json({ error: "A valid room code is required." }, { status: 400 });
-  await ensureSchema(env.DB);
-  const room = await readRoom(env.DB, code);
+  if (googleSheetsUrl) return proxySheetsGet(code);
+  try {
+    await ensureSchema();
+  } catch (error) {
+    return databaseError(error);
+  }
+  const room = await readRoom(code);
   return room ? Response.json(room) : Response.json({ error: "Room not found." }, { status: 404 });
 }
 
 export async function POST(request: Request) {
-  await ensureSchema(env.DB);
-  const body = await request.json() as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json() as Record<string, unknown>;
+  } catch {
+    return Response.json({ error: "A valid JSON request body is required." }, { status: 400 });
+  }
+  if (googleSheetsUrl) return proxySheetsPost(body);
+  try {
+    await ensureSchema();
+  } catch (error) {
+    return databaseError(error);
+  }
+  const sql = getDb();
   const action = String(body.action || "");
 
   if (action === "create") {
-    let code = String(Math.floor(100000 + Math.random() * 900000));
-    while (await env.DB.prepare("SELECT code FROM rooms WHERE code = ?").bind(code).first()) {
-      code = String(Math.floor(100000 + Math.random() * 900000));
+    let code = "";
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const candidate = String(Math.floor(100000 + Math.random() * 900000));
+      const existing = (await sql`SELECT code FROM rooms WHERE code = ${candidate}`) as { code: string }[];
+      if (!existing.length) {
+        code = candidate;
+        break;
+      }
     }
-    await env.DB.prepare("INSERT INTO rooms (code, title, active_question, ended, created_at) VALUES (?, ?, 0, 0, ?)")
-      .bind(code, "Untitled live session", new Date().toISOString()).run();
-    return Response.json(await readRoom(env.DB, code), { status: 201 });
+    if (!code) return Response.json({ error: "Could not create a unique room code." }, { status: 503 });
+
+    await sql`
+      INSERT INTO rooms (code, title, active_question, ended, created_at)
+      VALUES (${code}, ${"Untitled live session"}, 0, 0, ${new Date().toISOString()})
+    `;
+    return Response.json(await readRoom(code), { status: 201 });
   }
 
   const code = String(body.code || "").replace(/\D/g, "").slice(0, 6);
@@ -56,57 +154,80 @@ export async function POST(request: Request) {
   if (action === "updateTitle") {
     const title = String(body.title || "").trim().slice(0, 80);
     if (!title) return Response.json({ error: "A session title is required." }, { status: 400 });
-    const room = await env.DB.prepare("SELECT code FROM rooms WHERE code = ?").bind(code).first();
-    if (!room) return Response.json({ error: "Room not found." }, { status: 404 });
-    await env.DB.prepare("UPDATE rooms SET title = ? WHERE code = ?").bind(title, code).run();
-    return Response.json(await readRoom(env.DB, code));
+    const room = (await sql`SELECT code FROM rooms WHERE code = ${code}`) as { code: string }[];
+    if (!room.length) return Response.json({ error: "Room not found." }, { status: 404 });
+    await sql`UPDATE rooms SET title = ${title} WHERE code = ${code}`;
+    return Response.json(await readRoom(code));
   }
+
   if (action === "addQuestion") {
-    const room = await env.DB.prepare("SELECT code, active_question AS activeQuestion, ended FROM rooms WHERE code = ?").bind(code).first<{ code: string; activeQuestion: number; ended: number }>();
+    const roomRows = (await sql`
+      SELECT code, active_question AS "activeQuestion", ended
+      FROM rooms WHERE code = ${code}
+    `) as { code: string; activeQuestion: number; ended: number }[];
+    const room = roomRows[0];
     if (!room) return Response.json({ error: "Room not found." }, { status: 404 });
     if (room.ended) return Response.json({ error: "This session has ended." }, { status: 409 });
+    const existing = (await sql`SELECT id FROM questions WHERE room_code = ${code} LIMIT 1`) as { id: number }[];
+    if (existing.length) return Response.json({ error: "This session already has its one open question." }, { status: 409 });
 
     const type = String(body.type || "");
     const prompt = String(body.prompt || "").trim().slice(0, 160);
-    const options = Array.isArray(body.options) ? body.options.map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 10) : [];
-    if (!["choice", "word", "rating"].includes(type) || !prompt) return Response.json({ error: "A valid question is required." }, { status: 400 });
-    if (type === "choice" && options.length < 2) return Response.json({ error: "Multiple choice needs at least two answers." }, { status: 400 });
+    const options = Array.isArray(body.options)
+      ? body.options.map((option) => String(option).trim().slice(0, 80)).filter(Boolean).slice(0, 10)
+      : [];
+    if (type !== "open" || !prompt) {
+      return Response.json({ error: "A valid question is required." }, { status: 400 });
+    }
 
-    const positionRow = await env.DB.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS position FROM questions WHERE room_code = ?").bind(code).first<{ position: number }>();
-    await env.DB.prepare("INSERT INTO questions (room_code, type, prompt, options, position) VALUES (?, ?, ?, ?, ?)")
-      .bind(code, type, prompt, JSON.stringify(options), positionRow?.position ?? 0).run();
-    const question = await env.DB.prepare("SELECT id FROM questions WHERE room_code = ? ORDER BY id DESC LIMIT 1").bind(code).first<{ id: number }>();
-    if (!room.activeQuestion && question?.id) await env.DB.prepare("UPDATE rooms SET active_question = ? WHERE code = ?").bind(question.id, code).run();
-    return Response.json(await readRoom(env.DB, code), { status: 201 });
+    const positionRows = (await sql`
+      SELECT COALESCE(MAX(position), -1) + 1 AS position
+      FROM questions WHERE room_code = ${code}
+    `) as { position: number }[];
+    const position = positionRows[0]?.position ?? 0;
+    const inserted = (await sql`
+      INSERT INTO questions (room_code, type, prompt, options, position)
+      VALUES (${code}, ${type}, ${prompt}, ${JSON.stringify(options)}, ${position})
+      RETURNING id
+    `) as { id: number }[];
+    const insertedId = inserted[0]?.id;
+    if (!room.activeQuestion && insertedId) {
+      await sql`UPDATE rooms SET active_question = ${insertedId} WHERE code = ${code}`;
+    }
+    return Response.json(await readRoom(code), { status: 201 });
   }
 
   if (action === "activate") {
-    const room = await env.DB.prepare("SELECT ended FROM rooms WHERE code = ?").bind(code).first<{ ended: number }>();
-    if (room?.ended) return Response.json({ error: "This session has ended." }, { status: 409 });
-    const valid = await env.DB.prepare("SELECT id FROM questions WHERE id = ? AND room_code = ?").bind(questionId, code).first();
-    if (!valid) return Response.json({ error: "Question not found." }, { status: 404 });
-    await env.DB.prepare("UPDATE rooms SET active_question = ? WHERE code = ?").bind(questionId, code).run();
+    const roomRows = (await sql`SELECT ended FROM rooms WHERE code = ${code}`) as { ended: number }[];
+    if (roomRows[0]?.ended) return Response.json({ error: "This session has ended." }, { status: 409 });
+    const valid = (await sql`SELECT id FROM questions WHERE id = ${questionId} AND room_code = ${code}`) as { id: number }[];
+    if (!valid.length) return Response.json({ error: "Question not found." }, { status: 404 });
+    await sql`UPDATE rooms SET active_question = ${questionId} WHERE code = ${code}`;
     return Response.json({ ok: true });
   }
 
   if (action === "vote") {
-    const id = String(body.participantId || "").slice(0, 80);
-    const answer = String(body.answer || "").trim().slice(0, 48);
-    const room = await env.DB.prepare("SELECT ended FROM rooms WHERE code = ?").bind(code).first<{ ended: number }>();
-    if (room?.ended) return Response.json({ error: "This session has ended." }, { status: 409 });
-    if (!id || !answer) return Response.json({ error: "An answer is required." }, { status: 400 });
-    const valid = await env.DB.prepare("SELECT id FROM questions WHERE id = ? AND room_code = ?").bind(questionId, code).first();
-    if (!valid) return Response.json({ error: "Question not found." }, { status: 404 });
-    await env.DB.prepare("INSERT INTO responses (room_code, question_id, participant_id, answer, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(code, questionId, id, answer, new Date().toISOString()).run();
+    const participantId = String(body.participantId || "").slice(0, 80);
+    const displayName = String(body.displayName || body.name || "").trim().slice(0, 60) || "Anonymous participant";
+    const roomRows = (await sql`SELECT ended FROM rooms WHERE code = ${code}`) as { ended: number }[];
+    if (roomRows[0]?.ended) return Response.json({ error: "This session has ended." }, { status: 409 });
+    const answerQuestion = (await sql`SELECT id, type FROM questions WHERE id = ${questionId} AND room_code = ${code}`) as { id: number; type: string }[];
+    const maxAnswerLength = answerQuestion[0]?.type === "open" ? 500 : 48;
+    const answer = String(body.answer || "").trim().slice(0, maxAnswerLength);
+    if (!participantId || !answer) return Response.json({ error: "An answer is required." }, { status: 400 });
+    if (!answerQuestion.length) return Response.json({ error: "Question not found." }, { status: 404 });
+    await sql`
+      INSERT INTO responses (room_code, question_id, participant_id, display_name, answer, created_at)
+      VALUES (${code}, ${questionId}, ${participantId}, ${displayName}, ${answer}, ${new Date().toISOString()})
+    `;
     return Response.json({ ok: true });
   }
 
   if (action === "end") {
-    const room = await env.DB.prepare("SELECT code FROM rooms WHERE code = ?").bind(code).first();
-    if (!room) return Response.json({ error: "Room not found." }, { status: 404 });
-    await env.DB.prepare("UPDATE rooms SET ended = 1 WHERE code = ?").bind(code).run();
-    return Response.json(await readRoom(env.DB, code));
+    const room = (await sql`SELECT code FROM rooms WHERE code = ${code}`) as { code: string }[];
+    if (!room.length) return Response.json({ error: "Room not found." }, { status: 404 });
+    await sql`UPDATE rooms SET ended = 1 WHERE code = ${code}`;
+    return Response.json(await readRoom(code));
   }
 
   return Response.json({ error: "Unknown action." }, { status: 400 });

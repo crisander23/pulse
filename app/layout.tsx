@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
   title: "Pulse - live ideas, together",
   description: "Create live polls, invite your audience, and watch every response come together in real time.",
   icons: { icon: "/favicon.svg" },
