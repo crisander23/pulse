@@ -1,4 +1,5 @@
 import { ensureSchema, getDb } from "@/db";
+import { getAuthenticatedSupabase } from "@/lib/supabase-server";
 
 type RoomRow = {
   code: string;
@@ -43,6 +44,10 @@ const googleSheetsSecret = process.env.GOOGLE_APPS_SCRIPT_SECRET?.trim();
 
 function sheetsConfigError() {
   return Response.json({ error: "Google Sheets is selected, but GOOGLE_APPS_SCRIPT_SECRET is not configured." }, { status: 500 });
+}
+
+function presenterAuthError() {
+  return Response.json({ error: "Presenter sign-in is required for this action." }, { status: 401 });
 }
 
 async function proxySheetsPost(body: Record<string, unknown>) {
@@ -124,6 +129,7 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const code = params.get("code")?.replace(/\D/g, "").slice(0, 6) || "";
   if (params.get("list") === "1") {
+    if (!await getAuthenticatedSupabase(request)) return presenterAuthError();
     if (googleSheetsUrl) return proxySheetsGet("");
     try {
       await ensureSchema();
@@ -150,6 +156,9 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "A valid JSON request body is required." }, { status: 400 });
   }
+  const action = String(body.action || "");
+  const presenterActions = new Set(["create", "updateTitle", "addQuestion", "activate", "end"]);
+  if (presenterActions.has(action) && !await getAuthenticatedSupabase(request)) return presenterAuthError();
   if (googleSheetsUrl) return proxySheetsPost(body);
   try {
     await ensureSchema();
@@ -157,8 +166,6 @@ export async function POST(request: Request) {
     return databaseError(error);
   }
   const sql = getDb();
-  const action = String(body.action || "");
-
   if (action === "create") {
     let code = "";
     for (let attempt = 0; attempt < 20; attempt += 1) {

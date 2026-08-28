@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type Question = { id: number; type: "open"; prompt: string; options: string[]; position: number };
 type PollData = {
@@ -76,6 +77,43 @@ function formatSessionDate(value: string) {
 
 function formatRoomCode(code: string) {
   return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
+}
+
+async function presenterFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) throw new Error("Supabase authentication is not configured yet.");
+  const { data } = await supabase.auth.getSession();
+  if (!data.session) throw new Error("Please sign in as the presenter first.");
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${data.session.access_token}`);
+  return fetch(input, { ...init, headers });
+}
+
+function AuthPanel({ onBack }: { onBack: () => void }) {
+  const supabase = getSupabaseBrowserClient();
+  const [signUp, setSignUp] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!supabase) { setError("Supabase authentication is not configured yet."); return; }
+    setBusy(true);
+    setError("");
+    setMessage("");
+    const result = signUp
+      ? await supabase.auth.signUp({ email: email.trim(), password })
+      : await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (result.error) setError(result.error.message);
+    else if (signUp && !result.data.session) setMessage("Check your email to confirm your account, then sign in.");
+    else setMessage(signUp ? "Account created." : "Signed in.");
+    setBusy(false);
+  }
+
+  return <main className="auth-shell"><section className="auth-card"><Logo /><span className="question-kicker">PRESENTER ACCOUNT</span><h1>{signUp ? "Create your Pulse account" : "Sign in to Pulse"}</h1><p className="auth-description">Your account protects session management. Audience members can still join and respond without signing up.</p><form onSubmit={submit} className="auth-form"><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={signUp ? "new-password" : "current-password"} minLength={6} required /></label><button className="composer-submit" disabled={busy}>{busy ? "Please wait..." : signUp ? "Create account" : "Sign in"}</button></form>{error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="auth-message" role="status">{message}</p>}<div className="auth-links"><button type="button" onClick={() => { setSignUp(!signUp); setError(""); setMessage(""); }}>{signUp ? "Already have an account? Sign in" : "Need an account? Sign up"}</button><button type="button" onClick={onBack}>Back to Pulse</button></div></section></main>;
 }
 
 function Results({ question, responses, wallTitle, frameless = false, hideWallHeader = false }: { question: Question; responses: PollData["responses"]; wallTitle?: string; frameless?: boolean; hideWallHeader?: boolean }) {
@@ -171,7 +209,7 @@ function SessionManagement({ onCreate, onBack, onOpen }: { onCreate: () => void;
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/polls?list=1", { cache: "no-store" });
+      const response = await presenterFetch("/api/polls?list=1", { cache: "no-store" });
       const result = await response.json().catch(() => ({ error: "The server returned an invalid response." }));
       if (!response.ok) throw new Error(result.error || "Could not load session history.");
       setSessions(Array.isArray(result.sessions) ? result.sessions : []);
@@ -258,7 +296,7 @@ function Presenter({ code, initial, onManage }: { code: string; initial: PollDat
     const title = titleDraft.trim();
     if (!title) { setTitleDraft(data.room.title); return; }
     if (title === data.room.title) return;
-    const response = await fetch("/api/polls", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "updateTitle", code, title }) });
+    const response = await presenterFetch("/api/polls", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "updateTitle", code, title }) });
     if (response.ok) setData(await response.json());
   }
 
@@ -274,7 +312,7 @@ function Presenter({ code, initial, onManage }: { code: string; initial: PollDat
 
   async function endSession() {
     if (!confirm("End this session and generate the consolidated report?")) return;
-    const response = await fetch("/api/polls", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "end", code }) });
+    const response = await presenterFetch("/api/polls", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "end", code }) });
     if (response.ok) setData(await response.json());
   }
 
@@ -282,7 +320,7 @@ function Presenter({ code, initial, onManage }: { code: string; initial: PollDat
     event.preventDefault();
     if (!data || !draftPrompt.trim() || data.questions.length) return;
     setSaving(true);
-    const response = await fetch("/api/polls", {
+    const response = await presenterFetch("/api/polls", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "addQuestion", code, type: "open", prompt: draftPrompt.trim(), options: [] }),
@@ -376,12 +414,22 @@ function Audience({ code }: { code: string }) {
 }
 
 export default function Home() {
-  const [mode, setMode] = useState<"landing" | "present" | "audience" | "screen" | "manage">("landing");
+  const [mode, setMode] = useState<"landing" | "present" | "audience" | "screen" | "manage" | "auth">("landing");
   const [code, setCode] = useState("");
   const [data, setData] = useState<PollData | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [authReady, setAuthReady] = useState(false);
+  const [authUser, setAuthUser] = useState<{ email?: string } | null>(null);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) { setAuthReady(true); return; }
+    supabase.auth.getSession().then(({ data }) => { setAuthUser(data.session?.user || null); setAuthReady(true); });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setAuthUser(session?.user || null));
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -396,10 +444,11 @@ export default function Home() {
   }, []);
 
   async function createRoom() {
+    if (!authUser) { setMode("auth"); return; }
     setCreating(true);
     setCreateError("");
     try {
-      const response = await fetch("/api/polls", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create" }) });
+      const response = await presenterFetch("/api/polls", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create" }) });
       const result = await response.json().catch(() => ({ error: "The server returned an invalid response." }));
       if (!response.ok) throw new Error(result.error || "Could not create the poll.");
       history.pushState({}, "", "?present=" + result.room.code);
@@ -420,6 +469,7 @@ export default function Home() {
   }
 
   function openManagement() {
+    if (!authUser) { setMode("auth"); return; }
     history.pushState({}, "", "?manage=1");
     setMode("manage");
   }
@@ -432,10 +482,11 @@ export default function Home() {
   }
 
   if (mode === "screen") return <PresentationScreen code={code} />;
+  if (mode === "auth") return <AuthPanel onBack={() => { history.pushState({}, "", "/"); setMode("landing"); }} />;
   if (mode === "present") return <Presenter code={code} initial={data} onManage={openManagement} />;
   if (mode === "audience") return <Audience code={code} />;
   if (mode === "manage") return <SessionManagement onCreate={createRoom} onBack={() => { history.pushState({}, "", "/"); setMode("landing"); }} onOpen={openSessionFromHistory} />;
-  return <main className="landing"><nav><Logo /><div><a href="#how">How it works</a><a href="#formats">The format</a><button className="history-link" onClick={openManagement}>Session history</button><button onClick={createRoom}>{creating ? "Creating..." : "Create question"}</button></div></nav>
+  return <main className="landing"><nav><Logo /><div><a href="#how">How it works</a><a href="#formats">The format</a><button className="history-link" onClick={openManagement}>Session history</button>{authReady && authUser ? <button onClick={() => getSupabaseBrowserClient()?.auth.signOut()}>Sign out</button> : <button onClick={() => setMode("auth")}>Presenter sign in</button>}<button onClick={createRoom}>{creating ? "Creating..." : "Create question"}</button></div></nav>
     <section className="hero"><div className="hero-copy"><span className="eyebrow">ONE QUESTION. EVERY VOICE.</span><h1>Turn every audience into a <em>conversation.</em></h1><p>Ask one open-ended question. Collect thoughtful answers. Watch the room respond in real time.</p><div className="hero-actions"><button onClick={createRoom} disabled={creating}>{creating ? "Opening your room..." : "Start an open question"}<span>-&gt;</span></button><small>No sign-up needed</small>{createError && <small role="alert">{createError}</small>}</div></div>
       <div className="hero-visual" aria-label="Open question preview"><div className="float-badge badge-one">42 live</div><div className="float-badge badge-two">Anonymous answers</div><div className="preview-card"><div className="preview-top"><span>OPEN QUESTION</span><i>...</i></div><h2>What would make this session better?</h2><div className="preview-cloud"><b>More examples</b><span>Time to discuss</span><strong>Clear goals</strong><i>Small groups</i><em>Real feedback</em><small>More practice</small></div><div className="preview-foot"><span>42 responses</span><span>updating live</span></div></div></div>
     </section>

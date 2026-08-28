@@ -66,3 +66,13 @@ Do not use the old Cloudflare D1 binding. The API now reads `DATABASE_URL` and u
 - `npm start`: serve the production build locally
 - `npm test`: run the build and deployment-safety checks
 - `npm run lint`: run ESLint
+# Presenter authentication
+
+Pulse uses Supabase Auth for presenter accounts. Audience members remain anonymous and do not need to sign up. Add these environment variables locally and in Vercel:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
+```
+
+The existing Google Apps Script variables continue to store poll sessions and responses. Presenter-only actions such as creating, editing, and ending sessions require a valid Supabase session.
