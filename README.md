@@ -1,6 +1,6 @@
-# Pulse Live Polls
+# ITMO — I-TANONG MO
 
-Pulse is a focused live open-question app: a presenter creates one room and one prompt, shares the room code or link, and participants submit anonymous text answers while the presenter watches the response wall update in real time.
+ITMO (I-TANONG MO) is a focused live open-question app: a presenter creates one room and one prompt, shares the room code or link, and participants submit anonymous text answers while the presenter watches the response wall update in real time.
 
 ## Stack
 

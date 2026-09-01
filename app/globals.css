@@ -8,6 +8,10 @@ button,input { font:inherit; }
 button,a { -webkit-tap-highlight-color:transparent; }
 button { cursor:pointer; }
 .logo { display:flex; align-items:center; gap:10px; font-size:1.4rem; font-weight:850; letter-spacing:-.06em; }
+.logo-lockup { display:flex; flex-direction:column; gap:3px; line-height:.9; }
+.logo-lockup b { font-size:1em; }
+.logo-accent { color:var(--purple); }
+.logo-lockup small { color:#777287; font-size:.38em; font-weight:800; letter-spacing:.08em; }
 .logo-mark { width:30px; height:27px; display:flex; align-items:flex-end; gap:3px; transform:rotate(-4deg); }
 .logo-mark i { display:block; width:7px; border-radius:5px; background:var(--purple); }
 .logo-mark i:nth-child(1){height:14px}.logo-mark i:nth-child(2){height:25px}.logo-mark i:nth-child(3){height:19px}

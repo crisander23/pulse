@@ -46,7 +46,7 @@ function participantId() {
 }
 
 function Logo() {
-  return <div className="logo" aria-label="Pulse"><span className="logo-mark"><i /><i /><i /></span><span>pulse</span></div>;
+  return <div className="logo" aria-label="ITMO — I-TANONG MO"><span className="logo-mark"><i /><i /><i /></span><span className="logo-lockup"><b><span className="logo-accent" style={{ color: "var(--purple)" }}>IT</span>MO</b><small>I-TANONG MO</small></span></div>;
 }
 
 function anonymousDisplayName() {
@@ -93,7 +93,7 @@ function downloadResultsCsv(data: PollData) {
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `pulse-${data.room.code}-results.csv`;
+  link.download = `itmo-${data.room.code}-results.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -132,7 +132,7 @@ function AuthPanel({ onBack, onSuccess }: { onBack: () => void; onSuccess: () =>
     setBusy(false);
   }
 
-  return <main className="auth-shell"><section className="auth-card"><Logo /><span className="question-kicker">PRESENTER ACCOUNT</span><h1>{signUp ? "Create your Pulse account" : "Sign in to Pulse"}</h1><p className="auth-description">Your account protects session management. Audience members can still join and respond without signing up.</p><form onSubmit={submit} className="auth-form"><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={signUp ? "new-password" : "current-password"} minLength={6} required /></label><button className="composer-submit" disabled={busy}>{busy ? "Please wait..." : signUp ? "Create account" : "Sign in"}</button></form>{error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="auth-message" role="status">{message}</p>}<div className="auth-links"><button type="button" onClick={() => { setSignUp(!signUp); setError(""); setMessage(""); }}>{signUp ? "Already have an account? Sign in" : "Need an account? Sign up"}</button><button type="button" onClick={onBack}>Back to Pulse</button></div></section></main>;
+  return <main className="auth-shell"><section className="auth-card"><Logo /><span className="question-kicker">PRESENTER ACCOUNT</span><h1>{signUp ? "Create your ITMO account" : "Sign in to ITMO"}</h1><p className="auth-description">Your account protects session management. Audience members can still join and respond without signing up.</p><form onSubmit={submit} className="auth-form"><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={signUp ? "new-password" : "current-password"} minLength={6} required /></label><button className="composer-submit" disabled={busy}>{busy ? "Please wait..." : signUp ? "Create account" : "Sign in"}</button></form>{error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="auth-message" role="status">{message}</p>}<div className="auth-links"><button type="button" onClick={() => { setSignUp(!signUp); setError(""); setMessage(""); }}>{signUp ? "Already have an account? Sign in" : "Need an account? Sign up"}</button><button type="button" onClick={onBack}>Back to ITMO</button></div></section></main>;
 }
 
 function Results({ question, responses, wallTitle, frameless = false, hideWallHeader = false }: { question: Question; responses: PollData["responses"]; wallTitle?: string; frameless?: boolean; hideWallHeader?: boolean }) {
