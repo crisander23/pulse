@@ -132,7 +132,44 @@ function AuthPanel({ onBack, onSuccess }: { onBack: () => void; onSuccess: () =>
     setBusy(false);
   }
 
-  return <main className="auth-shell"><section className="auth-card"><Logo /><span className="question-kicker">PRESENTER ACCOUNT</span><h1>{signUp ? "Create your ITMO account" : "Sign in to ITMO"}</h1><p className="auth-description">Your account protects session management. Audience members can still join and respond without signing up.</p><form onSubmit={submit} className="auth-form"><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={signUp ? "new-password" : "current-password"} minLength={6} required /></label><button className="composer-submit" disabled={busy}>{busy ? "Please wait..." : signUp ? "Create account" : "Sign in"}</button></form>{error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="auth-message" role="status">{message}</p>}<div className="auth-links"><button type="button" onClick={() => { setSignUp(!signUp); setError(""); setMessage(""); }}>{signUp ? "Already have an account? Sign in" : "Need an account? Sign up"}</button><button type="button" onClick={onBack}>Back to ITMO</button></div></section></main>;
+  async function sendRecovery() {
+    if (!supabase) { setError("Supabase authentication is not configured yet."); return; }
+    if (!email.trim()) { setError("Enter your email first."); return; }
+    setBusy(true);
+    setError("");
+    setMessage("");
+    const result = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${publicOrigin()}/` });
+    if (result.error) setError(result.error.message);
+    else setMessage("Check your email for a password-reset link. It expires in 60 minutes.");
+    setBusy(false);
+  }
+
+  return <main className="auth-shell"><section className="auth-card"><Logo /><span className="question-kicker">PRESENTER ACCOUNT</span><h1>{signUp ? "Create your ITMO account" : "Sign in to ITMO"}</h1><p className="auth-description">Your account protects session management. Audience members can still join and respond without signing up.</p><form onSubmit={submit} className="auth-form"><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={signUp ? "new-password" : "current-password"} minLength={6} required /></label><button className="composer-submit" disabled={busy}>{busy ? "Please wait..." : signUp ? "Create account" : "Sign in"}</button></form>{error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="auth-message" role="status">{message}</p>}<div className="auth-links">{!signUp && <button type="button" onClick={sendRecovery} disabled={busy}>Forgot password?</button>}<button type="button" onClick={() => { setSignUp(!signUp); setError(""); setMessage(""); }}>{signUp ? "Already have an account? Sign in" : "Need an account? Sign up"}</button><button type="button" onClick={onBack}>Back to ITMO</button></div></section></main>;
+}
+
+function PasswordResetPanel({ onBack, onSuccess }: { onBack: () => void; onSuccess: () => void }) {
+  const supabase = getSupabaseBrowserClient();
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!supabase) { setError("Supabase authentication is not configured yet."); return; }
+    if (password.length < 6) { setError("Your new password must be at least 6 characters."); return; }
+    if (password !== confirmPassword) { setError("The passwords do not match."); return; }
+    setBusy(true);
+    setError("");
+    setMessage("");
+    const result = await supabase.auth.updateUser({ password });
+    if (result.error) setError(result.error.message);
+    else { setMessage("Password updated. You can now use ITMO."); setPassword(""); setConfirmPassword(""); }
+    setBusy(false);
+  }
+
+  return <main className="auth-shell"><section className="auth-card"><Logo /><span className="question-kicker">PRESENTER ACCOUNT</span><h1>Set a new password</h1><p className="auth-description">Choose a new password for your ITMO presenter account.</p><form onSubmit={submit} className="auth-form"><label>New password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={6} required /></label><label>Confirm password<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={6} required /></label><button className="composer-submit" disabled={busy}>{busy ? "Updating..." : "Update password"}</button></form>{error && <p className="auth-error" role="alert">{error}</p>}{message && <p className="auth-message" role="status">{message}</p>}<div className="auth-links"><button type="button" onClick={onSuccess}>Continue to ITMO</button><button type="button" onClick={onBack}>Back to ITMO</button></div></section></main>;
 }
 
 function Results({ question, responses, wallTitle, frameless = false, hideWallHeader = false }: { question: Question; responses: PollData["responses"]; wallTitle?: string; frameless?: boolean; hideWallHeader?: boolean }) {
@@ -447,7 +484,7 @@ function Audience({ code }: { code: string }) {
 }
 
 export default function Home() {
-  const [mode, setMode] = useState<"landing" | "present" | "audience" | "screen" | "manage" | "auth">("landing");
+  const [mode, setMode] = useState<"landing" | "present" | "audience" | "screen" | "manage" | "auth" | "reset">("landing");
   const [code, setCode] = useState("");
   const [data, setData] = useState<PollData | null>(null);
   const [joinCode, setJoinCode] = useState("");
@@ -461,7 +498,7 @@ export default function Home() {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) { setAuthReady(true); return; }
     supabase.auth.getSession().then(({ data }) => { setAuthUser(data.session?.user || null); setAuthReady(true); });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setAuthUser(session?.user || null));
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => { setAuthUser(session?.user || null); if (event === "PASSWORD_RECOVERY") setMode("reset"); });
     return () => listener.subscription.unsubscribe();
   }, []);
 
@@ -471,7 +508,9 @@ export default function Home() {
     const room = params.get("room");
     const screen = params.get("screen");
     const manage = params.get("manage");
-    if (manage) setMode("manage");
+    const recovery = location.hash.includes("type=recovery") || params.get("type") === "recovery";
+    if (recovery) setMode("reset");
+    else if (manage) setMode("manage");
     else if (screen) { setCode(screen); setMode("screen"); }
     else if (present) { setCode(present); setMode("present"); }
     else if (room) { setCode(room); setMode("audience"); }
@@ -519,6 +558,7 @@ export default function Home() {
   if (!routeReady) return <main className="center"><div className="loader" /><p>Opening Pulse...</p></main>;
   if (mode === "screen") return <PresentationScreen code={code} />;
   if (mode === "auth") return <AuthPanel onBack={() => { history.pushState({}, "", "/"); setMode("landing"); }} onSuccess={() => { history.pushState({}, "", "/"); setMode("landing"); }} />;
+  if (mode === "reset") return <PasswordResetPanel onBack={() => { history.replaceState({}, "", "/"); getSupabaseBrowserClient()?.auth.signOut(); setMode("landing"); }} onSuccess={() => { history.replaceState({}, "", "/"); setMode("landing"); }} />;
   if (mode === "present") return <Presenter code={code} initial={data} onManage={openManagement} />;
   if (mode === "audience") return <Audience code={code} />;
   if (mode === "manage") return <SessionManagement onCreate={createRoom} onBack={() => { history.pushState({}, "", "/"); setMode("landing"); }} onOpen={openSessionFromHistory} />;
