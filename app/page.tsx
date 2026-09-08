@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -190,6 +190,9 @@ function DisplayResponseBoard({ question, responses }: { question: Question; res
   const [followingLatest, setFollowingLatest] = useState(true);
   const [atTop, setAtTop] = useState(true);
   const [focusedResponse, setFocusedResponse] = useState<PollData["responses"][number] | null>(null);
+  const responseModalRef = useRef<HTMLElement>(null);
+  const responseTextRef = useRef<HTMLParagraphElement>(null);
+  const [responseFontSize, setResponseFontSize] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [responseLayout, setResponseLayout] = useState<"grid" | "list">("grid");
   const pageCount = Math.max(1, Math.ceil(answers.length / pageSize));
@@ -228,6 +231,30 @@ function DisplayResponseBoard({ question, responses }: { question: Question; res
     setFollowingLatest(board.scrollHeight - board.scrollTop - board.clientHeight < 18);
   }
 
+  useLayoutEffect(() => {
+    if (!focusedResponse) { setResponseFontSize(null); return; }
+    const modal = responseModalRef.current;
+    const text = responseTextRef.current;
+    if (!modal || !text) return;
+
+    const fitText = () => {
+      let size = 42;
+      const minimum = 16;
+      text.style.fontSize = `${size}px`;
+      while (text.scrollHeight > text.clientHeight && size > minimum) {
+        size -= 1;
+        text.style.fontSize = `${size}px`;
+      }
+      text.style.removeProperty("font-size");
+      setResponseFontSize(size);
+    };
+
+    fitText();
+    const observer = new ResizeObserver(fitText);
+    observer.observe(modal);
+    return () => observer.disconnect();
+  }, [focusedResponse]);
+
   return <section className="display-response-board">
     <header><span>Live responses</span><div className="response-board-tools"><p>{answers.length} submissions</p><div className="response-layout-toggle" role="group" aria-label="Response layout"><button type="button" className={responseLayout === "grid" ? "active" : ""} aria-pressed={responseLayout === "grid"} onClick={() => setResponseLayout("grid")}>Grid</button><button type="button" className={responseLayout === "list" ? "active" : ""} aria-pressed={responseLayout === "list"} onClick={() => setResponseLayout("list")}>List</button></div><button type="button" onClick={() => goToLatest()} disabled={followingLatest}>Latest</button></div></header>
     <div ref={boardRef} onScroll={trackScroll} className={"display-board-grid response-" + responseLayout + "-layout" + (!atTop ? " fading-top" : "")}>
@@ -235,10 +262,10 @@ function DisplayResponseBoard({ question, responses }: { question: Question; res
     </div>
     <nav className="response-pagination" aria-label="Response pages"><span className="pagination-range">{firstVisible}–{lastVisible} of {answers.length} submissions</span><span className="pagination-page">Page {currentPage + 1} of {pageCount}</span><div className="pagination-actions"><button type="button" onClick={() => changePage(currentPage - 1)} disabled={currentPage === 0}>← Previous</button><button type="button" onClick={() => changePage(currentPage + 1)} disabled={currentPage === pageCount - 1}>Next →</button></div></nav>
     {focusedResponse && <div className="response-focus-backdrop" role="presentation" onMouseDown={() => setFocusedResponse(null)}>
-        <section className={`response-focus-modal${focusedResponse.answer.length > 320 ? " long-response" : ""}`} role="dialog" aria-modal="true" aria-label="Audience response" onMouseDown={(event) => event.stopPropagation()}>
+        <section ref={responseModalRef} className={`response-focus-modal${focusedResponse.answer.length > 320 ? " long-response" : ""}`} role="dialog" aria-modal="true" aria-label="Audience response" onMouseDown={(event) => event.stopPropagation()}>
         <button className="response-focus-close" onClick={() => setFocusedResponse(null)} aria-label="Close response">x</button>
         <span>{focusedResponse.displayName || "Anonymous participant"}</span>
-        <p>{focusedResponse.answer}</p>
+        <p ref={responseTextRef} style={responseFontSize ? { fontSize: `${responseFontSize}px` } : undefined}>{focusedResponse.answer}</p>
       </section>
     </div>}
   </section>;
