@@ -235,7 +235,7 @@ function DisplayResponseBoard({ question, responses }: { question: Question; res
     </div>
     <nav className="response-pagination" aria-label="Response pages"><span className="pagination-range">{firstVisible}–{lastVisible} of {answers.length} submissions</span><span className="pagination-page">Page {currentPage + 1} of {pageCount}</span><div className="pagination-actions"><button type="button" onClick={() => changePage(currentPage - 1)} disabled={currentPage === 0}>← Previous</button><button type="button" onClick={() => changePage(currentPage + 1)} disabled={currentPage === pageCount - 1}>Next →</button></div></nav>
     {focusedResponse && <div className="response-focus-backdrop" role="presentation" onMouseDown={() => setFocusedResponse(null)}>
-      <section className="response-focus-modal" role="dialog" aria-modal="true" aria-label="Audience response" onMouseDown={(event) => event.stopPropagation()}>
+        <section className={`response-focus-modal${focusedResponse.answer.length > 320 ? " long-response" : ""}`} role="dialog" aria-modal="true" aria-label="Audience response" onMouseDown={(event) => event.stopPropagation()}>
         <button className="response-focus-close" onClick={() => setFocusedResponse(null)} aria-label="Close response">x</button>
         <span>{focusedResponse.displayName || "Anonymous participant"}</span>
         <p>{focusedResponse.answer}</p>

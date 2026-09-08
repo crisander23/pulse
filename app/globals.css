@@ -117,9 +117,11 @@ button { cursor:pointer; }
 .display-response-card{cursor:pointer}
 .display-response-card:hover,.display-response-card:focus-visible{outline:none;border-color:#bcb5ff;box-shadow:0 12px 28px #28233d20;transform:translateY(-2px)}
 .response-focus-backdrop{position:fixed;inset:0;z-index:60;background:#17152dcc;backdrop-filter:blur(10px);display:grid;place-items:center;padding:24px}
-.response-focus-modal{position:relative;width:min(760px,100%);min-height:260px;border-radius:24px;background:#fff;padding:54px 58px;box-shadow:0 30px 90px #11102666;display:flex;flex-direction:column;justify-content:center}
+.response-focus-modal{position:relative;box-sizing:border-box;width:min(760px,100%);max-height:calc(100vh - 48px);min-height:260px;border-radius:24px;background:#fff;padding:54px 58px;box-shadow:0 30px 90px #11102666;display:flex;flex-direction:column;justify-content:center;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .response-focus-modal>span{color:var(--purple);font-size:.68rem;font-weight:850;letter-spacing:.15em;text-transform:uppercase}
-.response-focus-modal>p{margin:18px 0 0;font-family:Georgia,serif;font-size:clamp(2rem,4vw,3.8rem);line-height:1.08;letter-spacing:-.035em;color:var(--ink);overflow-wrap:anywhere}
+.response-focus-modal>p{margin:18px 0 0;font-family:Georgia,serif;font-size:clamp(1.45rem,3vw,2.6rem);line-height:1.16;letter-spacing:-.025em;color:var(--ink);overflow-wrap:anywhere;word-break:break-word}
+.response-focus-modal.long-response{justify-content:flex-start}
+.response-focus-modal.long-response>p{font-size:clamp(1.15rem,2vw,2rem);line-height:1.27;letter-spacing:-.012em}
 .response-focus-close{position:absolute;right:18px;top:16px;width:36px;height:36px;border:0;border-radius:50%;background:#f1eff5;color:#5d5968;font-size:1.35rem;cursor:pointer}
 @media(max-width:760px){.display-response-board>header{align-items:flex-start;flex-direction:column}.display-response-board>header>div{width:100%;justify-content:space-between}.response-focus-modal{padding:48px 28px 34px}.response-focus-modal>p{font-size:2rem}}
 .screen-stage h1{font-size:clamp(1.5rem,2.5vw,2.8rem);line-height:1.08;max-width:900px;margin:8px 0 20px}
